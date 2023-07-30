@@ -17,7 +17,9 @@ void Wheel3D::_notification(int p_what)
         local_xform = get_transform();
         cb->wheels.emplace(this);
         //  std::function<void(double)> wheel_physics_process = yes_body_physics_process;
+        //     void (Wheel3D::*wheel_physics_process)(double){no_body_physics_process};
 
+        wheel_physics_process = no_body_physics_process;
         //  wheel_physics_process = yes_body_physics_process;
         //        char *boo = std::type_info->typeid(wheel_offset).name();
     }
@@ -29,6 +31,9 @@ void Wheel3D::_notification(int p_what)
         if (!cb)
             return;
         //   std::function<void(double)> wheel_physics_process = no_body_physics_process;
+        //     void (Wheel3D::*wheel_physics_process)(double){yes_body_physics_process};
+
+        wheel_physics_process = yes_body_physics_process;
 
         //    wheel_physics_process = no_body_physics_process;
         cb->wheels.erase(this);
@@ -104,7 +109,7 @@ void Wheel3D::_ready()
 // }
 /* void yes_body_physics_process(double delta, Wheel3D &w)
 {
-    using namespace godot;
+    // using namespace godot;
     if (w.tire_cast.is_colliding())
     {
         Vector3 collisionPointGlobal = w.tire_cast.get_collision_point(0);
@@ -139,7 +144,7 @@ void Wheel3D::_ready()
 
     w.prev_compression = compression;
 } */
-void Wheel3D::_physics_process(double delta)
+/* bool Wheel3D::yes_body_physics_process(double delta)
 {
     using namespace godot;
     if (tire_cast.is_colliding())
@@ -174,22 +179,105 @@ void Wheel3D::_physics_process(double delta)
     apply_force(-suspensionForceVec, get_global_transform().get_basis().xform(wheel_connect_point));
 
     prev_compression = compression;
-}
+    return true;
+} */
+void Wheel3D::_physics_process(double delta)
+{
+    /*     wheel_physics_process();
+        using namespace godot;
+        if (tire_cast.is_colliding())
+        {
+            Vector3 collisionPointGlobal = tire_cast.get_collision_point(0);
+            Vector3 collisionNormal = tire_cast.get_collision_normal(0);
+            real_d tireSqueeze = 1.0 - tire_radius / collisionPointGlobal.distance_to(get_global_position());
+            //     apply_central_force(-20.0 * collisionNormal * tireSqueeze);
+        }
+        real_d compression = relaxed_position.distance_to(get_position()) / spring_length;
 
-// PackedStringArray Wheel3D::_get_configuration_warnings() const
-//{
-//     PackedStringArray warnings = Node::_get_configuration_warnings();
-//
-//     if (Object::cast_to<Vehicle3D>(get_parent()) == nullptr)
-//     {
-//         warnings.push_back("VehicleWheel3D serves to provide a wheel system to a VehicleBody3D. Please use it as a child of a VehicleBody3D.");
-//     }
-//
-//     return warnings;
-// }
+        // cout << relaxed_position.x << ", " << relaxed_position.y << ", " << relaxed_position.z << "\n";
+        // real_d max_force = spring_length * spring_stiffness;
+
+        spring_force = stiff_rel * compression;
+        //   real_d compress_delta = compression - prev_compression;
+        real_d compress_velocity = (compression - prev_compression) / delta;
+        if (compress_velocity > 0)
+            damp_force = bump_function(bump_rel, bump_curve, compress_velocity);
+        else
+            damp_force = rebound_function(rebound_rel, rebound_curve, compress_velocity);
+        //  damp_force = 1.0;
+        //   damp_force = (*bump_function)(rebound_rel, rebound_curve, compress_velocity);
+        Vector3 suspensionForceVec = steering_axis * (spring_force + damp_force);
+        Transform3D body_transform = body->get_transform().get_basis();
+        Basis body_basis = body_transform.get_basis();
+        Vector3 global_body_connect_point = to_global(body_connect_point);
+        Vector3 global_body_to_connection = global_body_connect_point - body->get_global_position();
+
+        body->apply_force(body_basis.xform(suspensionForceVec), global_body_to_connection);
+        //
+        apply_force(-suspensionForceVec, get_global_transform().get_basis().xform(wheel_connect_point));
+
+        prev_compression = compression; */
+}
+void Vehicle3D::_physics_process(double delta)
+{
+    //   for (int w_it = 0; w_it < wheels.size(); w_it++)
+    //   {
+    //       wheels[w_it].add_child();
+    //   }
+    Transform3D global_transform = get_global_transform();
+    Basis global_basis = global_transform.get_basis();
+    Vector3 global_position = global_transform.get_origin();
+    for (Wheel3D *w : wheels)
+    {
+        //   wheel_physics_process();
+        //   using namespace godot;
+        if (w->tire_cast.is_colliding())
+        {
+            Vector3 collisionPointGlobal = w->tire_cast.get_collision_point(0);
+            Vector3 collisionNormal = w->tire_cast.get_collision_normal(0);
+            real_d tireSqueeze = 1.0 - w->tire_radius / collisionPointGlobal.distance_to(w->get_global_position());
+            //     apply_central_force(-20.0 * collisionNormal * tireSqueeze);
+        }
+        real_d compression = w->relaxed_position.distance_to(w->get_position()) / w->spring_length;
+
+        // cout << relaxed_position.x << ", " << relaxed_position.y << ", " << relaxed_position.z << "\n";
+        // real_d max_force = spring_length * spring_stiffness;
+
+        w->spring_force = w->stiff_rel * compression;
+        //   real_d compress_delta = compression - prev_compression;
+        real_d compress_velocity = (compression - w->prev_compression) / delta;
+        if (compress_velocity > 0)
+            w->damp_force = bump_function(w->bump_rel, w->bump_curve, compress_velocity);
+        else
+            w->damp_force = rebound_function(w->rebound_rel, w->rebound_curve, compress_velocity);
+        //  damp_force = 1.0;
+        //   damp_force = (*bump_function)(rebound_rel, rebound_curve, compress_velocity);
+        Vector3 suspensionForceVec = w->steering_axis * (w->spring_force + w->damp_force);
+        // Transform3D body_transform = get_transform().get_basis();
+        //  Basis body_basis = body_transform.get_basis();
+
+        Vector3 global_body_connect_point = w->to_global(w->body_connect_point);
+        Vector3 global_body_to_connection = global_body_connect_point - global_position;
+
+        apply_force(local_basis.xform(suspensionForceVec), global_body_to_connection);
+        w->apply_force(-suspensionForceVec, global_basis.xform(w->wheel_connect_point));
+
+        w->prev_compression = compression;
+    }
+}
+PackedStringArray Wheel3D::_get_configuration_warnings() const
+{
+    PackedStringArray warnings = Node::_get_configuration_warnings();
+    if (Object::cast_to<Vehicle3D>(get_parent()) == nullptr)
+        warnings.push_back("Wheel3D must be a child of Vehicle3D to function as intended.");
+    return warnings;
+}
 
 void Vehicle3D::_ready()
 {
+    local_xform = get_transform();
+    local_basis = local_xform.get_basis();
+    local_origin = local_xform.get_origin();
     // for (int w_it = 0; w_it < wheels.size(); w_it++)
     // {
     //     wheels[w_it].add_child();

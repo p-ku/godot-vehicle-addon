@@ -37,7 +37,7 @@ public:
 private:
     NodePath opposite_wheel;
     real_d anti_roll = 1.0;
-    Vehicle3D *body = nullptr;
+    Vehicle3D *body = 0;
     SliderJoint3D suspension = SliderJoint3D();
     ShapeCast3D tire_cast = ShapeCast3D();
     double spring_force;
@@ -508,13 +508,22 @@ public:
 
     void _ready() override;
     void _physics_process(double delta) override;
-    //   void no_body_physics_process(double delta) { std::cout << delta << '\n'; }
+    PackedStringArray _get_configuration_warnings() const override;
+
     // std::function<void(double)> yes_body_physics_process;
 
     //  std::function<void(double)> no_body_physics_process = {};
     //  std::function<void(double)> wheel_physics_process;
     // void (Wheel3D::*wheel_physics_process)(double delta);
     // auto wheel_physics_process = no_body_physics_process;
+    // bool yes_body_physics_process(double delta);
+    // bool no_body_physics_process(double delta)
+    // {
+    //     std::cout << delta << '\n';
+    //     return true;
+    // }
+
+    //  void wheel_physics_process();
 
     Wheel3D()
     {
@@ -529,8 +538,13 @@ public:
 //
 //     //    get_type void (*Wheel3D::wheel_physics_process)(double delta);
 // } // namespace funcy2
+
 namespace
 {
+    //   void func(int a) { return; }
+    //   void (*ptr)(int) = &func;
+    //   int ddd = 5;
+    //   void (*ptr)(&ddd);
     double yes_damp_factor(real_d damping, Ref<Curve> damp_curve, real_d compress_velocity)
     {
         return damping * compress_velocity * (damp_curve->sample_baked(compress_velocity));
@@ -541,6 +555,12 @@ namespace
     }
     auto bump_function = no_damp_factor;
     auto rebound_function = no_damp_factor;
+    //  bool (Wheel3D::*wheel_physics_process)(double){no_body_physics_process}; // = &no_body_physics_process;
+    void yes_body_physics_process() {}
+    inline void no_body_physics_process() { return; }
+    auto wheel_physics_process = no_body_physics_process;
+
+    // auto wheel_physics_process = yes_body_physics_process;
 }
 
 VARIANT_ENUM_CAST(Wheel3D::Sides);
@@ -550,6 +570,13 @@ class Vehicle3D : public RigidBody3D
     GDCLASS(Vehicle3D, RigidBody3D);
 
     friend class Wheel3D;
+
+private:
+    Transform3D global_xform;
+    Transform3D local_xform;
+    Basis local_basis;
+    Vector3 local_origin;
+
     std::set<Wheel3D *> wheels;
 
 protected:
@@ -562,8 +589,11 @@ protected:
 public:
     std::set<Wheel3D *> get_wheels() const { return wheels; }
     void _ready() override;
+    void _physics_process(double delta) override;
 
-    Vehicle3D() {}
+    Vehicle3D()
+    {
+    }
     ~Vehicle3D() { queue_free(); }
 };
 
