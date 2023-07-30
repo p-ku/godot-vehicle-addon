@@ -46,4 +46,10 @@
   BIND_PROPERTY_SELECT(__VA_ARGS__, BIND_PROPERTY_1, BIND_PROPERTY_0) \
   (__VA_ARGS__)
 
+#define GPRINTVEC(vector2print) \
+  cout << vector2print.x << ", " << vector2print.y << ", " << vector2print.z << "\n";
+
+#define GPRINT(printee) \
+  std::cout << printee << "\n";
+
 #endif // MACROS_HPP

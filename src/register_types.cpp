@@ -2,9 +2,9 @@
 
 // #include <gdextension_interface.h>
 
-#include "vehicle_3d.hpp"
-#include "wheel_3d_gizmo_plugin.hpp"
-#include "wheel_3d_editor_plugin.hpp"
+#include "vehicle3d.hpp"
+// #include "wheel_3d_gizmo_plugin.hpp"
+// #include "wheel_3d_editor_plugin.hpp"
 
 using namespace godot;
 
@@ -15,12 +15,12 @@ void initialize_vehicle_module(ModuleInitializationLevel p_level)
         ClassDB::register_class<Wheel3D>();
         ClassDB::register_class<Vehicle3D>();
     }
-    else if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR)
-    {
-        ClassDB::register_class<Wheel3DGizmoPlugin>();
-        ClassDB::register_class<Wheel3DEditorPlugin>();
-        EditorPlugins::add_by_type<Wheel3DEditorPlugin>();
-    }
+    // else if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR)
+    // {
+    //   ClassDB::register_class<Wheel3DGizmoPlugin>();
+    //   ClassDB::register_class<Wheel3DEditorPlugin>();
+    //   EditorPlugins::add_by_type<Wheel3DEditorPlugin>();
+    // }
     else
     {
         return;
@@ -31,7 +31,7 @@ void uninitialize_vehicle_module(ModuleInitializationLevel p_level)
 {
     if (p_level == MODULE_INITIALIZATION_LEVEL_EDITOR)
     {
-        EditorPlugins::remove_by_type<Wheel3DEditorPlugin>();
+        //    EditorPlugins::remove_by_type<Wheel3DEditorPlugin>();
     }
     else
     {
