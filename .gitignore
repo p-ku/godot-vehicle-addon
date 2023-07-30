@@ -38,3 +38,26 @@ mono_crash.*.json
 *.exe
 *.out
 *.app
+
+# for projects that use SCons for building: http://http://www.scons.org/
+.sconf_temp
+.sconsign.dblite
+*.pyc
+
+# Binaries
+*.o
+*.os
+*.so
+*.obj
+*.bc
+*.pyc
+*.dblite
+*.pdb
+*.lib
+bin
+*.config
+*.creator
+*.creator.user
+*.files
+*.includes
+*.idb
