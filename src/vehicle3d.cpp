@@ -3,41 +3,83 @@
 #include <godot_cpp/classes/physics_direct_body_state3d.hpp>
 #include <godot_cpp/classes/physics_server3d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/utility_functions.hpp>
 
 using namespace godot;
 
-void Wheel3D::_on_wheel_rotated() {
-	set_rotation(centered_rotation);
-	rotate_object_local(steering_axis, ackermann_steering);
-}
+// void Wheel3D::_on_wheel_rotated() {
+//	set_rotation(centered_rotation);
+//	rotate_object_local(steering_axis, ackermann_steering);
+// }
 
-void Wheel3D::_on_centered_wheel_rotated() {
-	_update_steering_axis();
-	centered_rotation = Vector3(0.0, signed_toe_angle, -signed_camber_angle);
+// void Wheel3D::_on_wheel_rotated() {
+//_update_steering_axis();
+//_update_axle_axis();
 
-	_on_wheel_rotated();
-}
+//	centered_rotation = Vector3(0.0, signed_toe_angle, -signed_camber_angle);
+//	centered_position = get_basis().xform(
+//		local_w_connect_point -
+//		local_w_connect_point.rotated(steering_axis, ackermann_steering -
+// prev_ackermann_steering)
+//	);-axle_axis * wheel_offset
+//	centered_position = w_connect_point - Vector3(signed_wheel_offset, 0.0, 0.0);
+// set_rotation(Vector3(0.0, signed_toe_angle + ackermann_steering, -signed_camber_angle));
+// set_rotation(centered_rotation);
+//	rotate_object_local(steering_axis, ackermann_steering);
+//	_on_wheel_rotated();
+//}
 
-void Wheel3D::_on_suspension_rotated() {
-	_update_steering_axis();
-}
+// void Wheel3D::_on_suspension_rotated() {
+//	_update_steering_axis();
+// }
 
 void Wheel3D::_on_steering_changed() {
 	ackermann_factor = max_ackermann * ackermann_input;
 	ackermann_steering = Math::atan(
 		Math::tan(steering) / (1.0 + side_sign * ackermann_factor * Math::tan(steering))
 	);
+	//	set_rotation(Vector3(0.0, signed_toe_angle + ackermann_steering, -signed_camber_angle));
 
-	_on_wheel_rotated();
+	//	_on_wheel_rotated();
 	//	set_position(
 	//		v_connect_point +
 	//		get_basis().xform((-steering_axis * suspension_travel + wheel_offset * axle_axis)
 	//							  .rotated(steering_axis, ackermann_steering))
 	//	);
-	//	set_position(
-	//		v_connect_point - get_basis().xform(steering_axis * suspension_travel) +
-	//		get_basis().xform(wheel_offset * axle_axis.rotated(steering_axis, ackermann_steering))
+	//	set_rotation(Vector3(0.0, signed_toe_angle + ackermann_steering, -signed_camber_angle));
+	//	set_rotation(centered_rotation);
+	//	rotate_object_local(steering_axis, ackermann_steering);
+	// set_position(get_basis().xform(
+	//	-local_w_connect_point +
+	//	local_w_connect_point.rotated(steering_axis, -ackermann_steering +
+	// prev_ackermann_steering)
+	//));
+	//	translate_object_local(
+	//		-local_w_connect_point +
+	//		local_w_connect_point.rotated(steering_axis, ackermann_steering -
+	// prev_ackermann_steering)
 	//	);
+	// set_position(get_basis().xform(
+	//	dynamic_local_w_connect_point -
+	//	dynamic_local_w_connect_point.rotated(steering_axis, ackermann_steering)
+	//));
+	_update_axle_axis();
+	_update_dynamic_connect_points();
+	//	dynamic_local_w_connect_point = -wheel_offset * axle_axis;
+	// dynamic_local_v_connect_point = local_w_connect_point +
+	//	suspension_travel * steering_axis * uncompression;
+	set_position(v_connect_point_max - steering_axis * uncompression + wheel_offset * axle_axis);
+	// translate_object_local(
+	//	-local_w_connect_point +
+	//	local_w_connect_point.rotated(steering_axis, ackermann_steering - prev_ackermann_steering)
+	//);
+
+	//		set_position(centered_position);
+	prev_ackermann_steering = ackermann_steering;
+	// set_position(get_basis().xform(local_w_connect_point - local_w_connect_point));
+	_update_connect_points();
+	_update_suspension_transform();
+	update_gizmos();
 }
 
 void Wheel3D::_on_wheel_dimensions_changed() {
@@ -51,10 +93,11 @@ void Wheel3D::_on_wheel_dimensions_changed() {
 	// tire_cast.set_shape(tire_cast_shape);
 	corner_distance = Math::sqrt(tire_radius * tire_radius + 0.25 * tire_width * tire_width);
 	corner_angle = HALF_PI - Math::atan(tire_radius / (0.5 * tire_width));
+	update_gizmos();
 }
 
 template<typename Function>
-void Wheel3D::_curve_temp(Ref<Curve> curve, Function& func) {
+void Wheel3D::_curve_temp(Ref<Curve>& curve, Function& func) {
 	if (curve.is_valid()) {
 		func = yes_curve;
 	} else {
@@ -62,46 +105,77 @@ void Wheel3D::_curve_temp(Ref<Curve> curve, Function& func) {
 	}
 }
 
+void Wheel3D::_update_debug_shapes() {
+	suspension.set_position(local_w_connect_point);
+
+	springDebugB.set_position(Vector3(0, 0, 0));
+	axisDebug0.set_position(ZEROS);
+
+	springDebugA.set_position(Vector3(suspension_travel, 0, 0));
+	connectDebugA.set_position(local_w_connect_point + suspension_travel * steering_axis);
+	connectDebugB.set_position(local_w_connect_point);
+	axisDebugA.set_position(axle_axis);
+	axisDebugS.set_position(steering_axis + local_w_connect_point);
+	springDebugRay.set_position(local_w_connect_point + suspension_travel * steering_axis);
+	//	springDebugRay2.set_position(ZEROS);
+	//	springDebugRay2.set_target_position(axle_axis);
+}
+
+void Wheel3D::_add_debug_ray(const Vector3& position, const Vector3& target) {
+	RayCast3D ray;
+	ray.set_position(position);
+	ray.set_target_position(target);
+	add_child(&ray);
+}
+
 void Wheel3D::_update_steering_axis() {
-	steering_axis = UP_AXIS_REFERENCE.rotated(
-		FORWARD_AXIS_REFERENCE,
-		signed_steering_axis_inclination
-	);
-	steering_axis = steering_axis.rotated(RIGHT_AXIS_REFERENCE, caster_angle);
-	steering_axis = steering_axis.rotated(get_basis().get_column(1), -signed_toe_angle);
-	steering_axis = steering_axis.rotated(get_basis().get_column(1), ackermann_steering);
-	steering_axis = steering_axis.rotated(get_basis().get_column(2), signed_camber_angle);
+	// steering_axis = Vector3(Math::tan(signed_inclination), 1.0, Math::tan(caster_angle))
+	//					.normalized();
+	steering_axis.x = Math::tan(signed_inclination);
+	steering_axis.y = 1.0;
+	steering_axis.z = Math::tan(caster_angle);
 	steering_axis = steering_axis.normalized();
-	_update_suspension_transform();
-	_update_vehicle_connect_point();
+	_update_debug_shapes();
+};
+
+void Wheel3D::_update_axle_axis() {
+	axle_axis.x = side_sign;
+	axle_axis.y = -Math::tan(camber_angle);
+	axle_axis.z = -Math::tan(toe_angle);
+	axle_axis = axle_axis.normalized();
+	_update_debug_shapes();
 }
 
 void Wheel3D::_update_suspension_transform() {
 	suspension.set_rotation(Vector3(0, 0, HALF_PI));
-	suspension.rotate(FORWARD_AXIS_REFERENCE, signed_steering_axis_inclination);
-	suspension.rotate(RIGHT_AXIS_REFERENCE, caster_angle);
-	suspension.rotate(UP_AXIS_REFERENCE, -ackermann_steering);
 
-	suspension.rotate(get_basis().get_column(1), -signed_toe_angle);
-	suspension.rotate(get_basis().get_column(2), signed_camber_angle);
-
-	suspension.set_position(local_w_connect_point);
-
-	springDebugA.set_position(Vector3(suspension_travel, 0, 0));
-
-	connectDebugA.set_position(local_w_connect_point + suspension_travel * steering_axis);
-	connectDebugB.set_position(local_w_connect_point);
-	springDebugRay.set_position(local_w_connect_point + suspension_travel * steering_axis);
-	update_gizmos();
+	suspension.set_quaternion(Quaternion(RIGHT_AXIS, steering_axis).normalized());
+	_update_debug_shapes();
+	//	suspension.look_at(get_global_transform().get_basis().xform(steering_axis),
+	//-UP_AXIS);
+	//	suspension.rotate(UP_AXIS, HALF_PI);
+	//	suspension.rotate(FRONT_AXIS_REFERENCE, signed_inclination);
+	//	suspension.rotate(RIGHT_AXIS, caster_angle);
 }
 
-void Wheel3D::_update_vehicle_connect_point() {
-	local_v_connect_point = local_w_connect_point + suspension_travel * steering_axis;
-	// local_v_connect_point = get_position() +
-	v_connect_point = get_basis().xform(local_v_connect_point) + get_position();
+void Wheel3D::_update_connect_points() {
+	//	local_v_connect_point_max = local_w_connect_point + suspension_travel * steering_axis;
+	local_w_connect_point = -wheel_offset * axle_axis;
+	local_v_connect_point_max = local_w_connect_point + suspension_travel * steering_axis;
 
-	relaxed_wheel_connect_point = get_basis().xform(local_w_connect_point);
-	relaxed_wheel_connect_point = get_basis().xform(local_w_connect_point);
+	// local_v_connect_point_max = get_position() +
+	v_connect_point_max = get_basis().xform(local_v_connect_point_max) + get_position();
+	w_connect_point = get_basis().xform(local_w_connect_point) + get_position();
+	// relaxed_wheel_connect_point = get_basis().xform(local_w_connect_point);
+	// relaxed_wheel_connect_point = get_basis().xform(local_w_connect_point);
+	_update_debug_shapes();
+}
+
+void Wheel3D::_update_dynamic_connect_points() {
+	dynamic_local_w_connect_point = -wheel_offset * axle_axis;
+	dynamic_local_v_connect_point = local_w_connect_point +
+		suspension_travel * steering_axis * uncompression;
+	_update_debug_shapes();
 }
 
 // void Wheel3D::_update_suspension_length() {
@@ -112,7 +186,7 @@ void Wheel3D::_update_vehicle_connect_point() {
 
 void Wheel3D::_enter_tree() {
 	suspension.set_node_b(get_path());
-	Vehicle3D* cb = Object::cast_to<Vehicle3D>(get_parent());
+	Vehicle3D* cb = cast_to<Vehicle3D>(get_parent());
 	if (!cb) {
 		return;
 	}
@@ -124,7 +198,7 @@ void Wheel3D::_enter_tree() {
 
 void Wheel3D::_exit_tree() {
 	suspension.set_node_a("");
-	Vehicle3D* cb = Object::cast_to<Vehicle3D>(get_parent());
+	Vehicle3D* cb = cast_to<Vehicle3D>(get_parent());
 	if (!cb) {
 		return;
 	}
@@ -142,8 +216,11 @@ void Wheel3D::_ready() {
 	add_child(&tire_cast);
 	add_child(&hub_collider);
 	add_child(&suspension);
+	add_child(&axisDebug0);
+	add_child(&axisDebugS);
+	_add_debug_ray(ZEROS, axle_axis);
 
-	_update_vehicle_connect_point();
+	_update_connect_points();
 	suspension.add_child(&springDebugA);
 	suspension.add_child(&springDebugB);
 
@@ -153,7 +230,7 @@ void Wheel3D::_ready() {
 
 // void Wheel3D::_notification(int p_what) {
 //	if (p_what == NOTIFICATION_LOCAL_TRANSFORM_CHANGED || NOTIFICATION_PARENTED) {
-//		//	_update_vehicle_connect_point();
+//		//	_update_connect_points();
 //		//	Vector3 wheel_rot = get_rotation();
 //		//	signed_toe_angle = wheel_rot.y;
 //		//	toe_angle = signed_toe_angle * side_sign;
@@ -172,9 +249,9 @@ void Vehicle3D::_ready() {
 		add_child(&w->springDebugRay);
 
 		// add_child(&w->suspension);
-		w->connectDebugA.set_position(w->v_connect_point);
+		w->connectDebugA.set_position(get_basis().xform(w->local_v_connect_point_max));
 		w->connectDebugB.set_position(get_basis().xform(w->local_w_connect_point));
-		w->springDebugRay.set_position(w->v_connect_point);
+		w->springDebugRay.set_position(get_basis().xform(w->local_v_connect_point_max));
 
 		// w->suspension.set_node_a(get_path());
 	}
@@ -216,13 +293,13 @@ void Vehicle3D::_physics_process(double delta) {
 			//   collisionPointGlobal); w->apply_central_force(220632.0 * Vector3(0, 1, 0) /
 			//   tireSqueeze * tireSqueeze);
 		}
-		// w->compression = w->relaxed_position.distance_to(w_local_origin) / w->suspension_travel;
-		// double precomp =
+		// w->compression = w->relaxed_position.distance_to(w_local_origin) /
+		// w->suspension_travel; double precomp =
 		// w->to_global(w->local_w_connect_point).distance_to(to_global(w->v_connect_point)) /
 		// w->suspension_travel;
-		w->w_to_v = to_global(w->v_connect_point) - w->to_global(w->local_w_connect_point);
-		//	w->w_to_v = w->local_v_connect_point - w->local_w_connect_point;
-		//	w->w_to_v = w->local_v_connect_point - w->local_w_connect_point;
+		w->w_to_v = to_global(w->v_connect_point_max) - w->to_global(w->local_w_connect_point);
+		//	w->w_to_v = w->local_v_connect_point_max - w->local_w_connect_point;
+		//	w->w_to_v = w->local_v_connect_point_max - w->local_w_connect_point;
 
 		// double v_to_w_distance = w->v_to_w.length();
 
@@ -230,16 +307,20 @@ void Vehicle3D::_physics_process(double delta) {
 		// w->to_global(w->local_w_connect_point).distance_to(to_global(w->v_connect_point)) /
 		//                            w->suspension_travel;
 		Vector3 wheel_connect_p = w->get_basis().xform(w->local_w_connect_point);
-		w->compression = 1.0 - w->w_to_v.length() / w->suspension_travel;
+		w->uncompression = w->w_to_v.length() / w->suspension_travel;
+
+		w->compression = 1.0 - w->uncompression;
 		//	w->compression = 1.0 -
-		//		(wheel_connect_p - w->relaxed_wheel_connect_point).length() / w->suspension_travel;
+		//		(wheel_connect_p - w->relaxed_wheel_connect_point).length() /
+		// w->suspension_travel;
 
 		// w->w_to_v =
 		// (w->to_global(w->local_w_connect_point)).direction_to(to_global(w->v_connect_point));
 	}
 	for (Wheel3D* w : wheels) {
 		// double compression = 0.0;
-		// cout << relaxed_position.x << ", " << relaxed_position.y << ", " << relaxed_position.z <<
+		// cout << relaxed_position.x << ", " << relaxed_position.y << ", " <<
+		// relaxed_position.z <<
 		// "\n"; double max_force = suspension_travel * spring_stiffness;
 		double opposite_diff = w->compression - w->sib->compression;
 		w->spring_force = w->stiff_rel * w->compression;
@@ -278,19 +359,21 @@ void Vehicle3D::_physics_process(double delta) {
 		// Vector3 global_body_to_connection = global_body_connect_point - v_globalOrigin;
 
 		// apply_force(global_suspension_force, globalBasis.xform(w->v_connect_point));
-		// w->apply_force(-global_suspension_force, w->globalBasis.xform(w->local_w_connect_point));
+		// w->apply_force(-global_suspension_force,
+		// w->globalBasis.xform(w->local_w_connect_point));
 
-		apply_force(global_suspension_force_old, globalBasis.xform(w->v_connect_point));
+		apply_force(global_suspension_force_old, globalBasis.xform(w->v_connect_point_max));
 		w->apply_force(
 			-global_suspension_force_old,
 			w->globalBasis.xform(w->local_w_connect_point)
 		);
 		w->springDebugRay.set_target_position(
-			w->get_basis().xform(w->local_w_connect_point) + w->get_position() - w->v_connect_point
+			w->get_basis().xform(w->local_w_connect_point) + w->get_position() -
+			w->v_connect_point_max
 		);
 		w->prev_compression = w->compression;
+		w->prev_uncompression = w->uncompression;
 	}
-	GPRINTVEC(wheels[0]->v_connect_point);
 
 	RID riddy = get_rid();
 	PhysicsServer3D* physics_server = PhysicsServer3D::get_singleton();
@@ -336,7 +419,7 @@ double Wheel3D::get_ackermann_input() const {
 	return ackermann_input;
 }
 
-void Wheel3D::set_ackermann_input(double p_factor) {
+void Wheel3D::set_ackermann_input(const double& p_factor) {
 	ackermann_input = p_factor;
 	_on_steering_changed();
 }
@@ -345,7 +428,7 @@ double Wheel3D::get_steering() const {
 	return steering;
 }
 
-void Wheel3D::set_steering(double p_angle) {
+void Wheel3D::set_steering(const double& p_angle) {
 	steering = p_angle;
 	_on_steering_changed();
 }
@@ -354,7 +437,7 @@ double Wheel3D::get_engine_torque() const {
 	return engine_torque;
 }
 
-void Wheel3D::set_engine_torque(double p_torque) {
+void Wheel3D::set_engine_torque(const double& p_torque) {
 	engine_torque = p_torque;
 }
 
@@ -362,7 +445,7 @@ double Wheel3D::get_brake_torque() const {
 	return brake_torque;
 }
 
-void Wheel3D::set_brake_torque(double p_torque) {
+void Wheel3D::set_brake_torque(const double& p_torque) {
 	brake_torque = p_torque;
 }
 
@@ -370,52 +453,49 @@ double Wheel3D::get_tire_radius() const {
 	return tire_radius;
 }
 
-void Wheel3D::set_tire_radius(double p_radius) {
+void Wheel3D::set_tire_radius(const double& p_radius) {
 	tire_radius = p_radius;
 	if (tire_radius < hub_radius) {
 		hub_radius = tire_radius;
 	}
 
 	_on_wheel_dimensions_changed();
-	update_gizmos();
 }
 
 double Wheel3D::get_width() const {
 	return tire_width;
 }
 
-void Wheel3D::set_width(double p_width) {
+void Wheel3D::set_width(const double& p_width) {
 	tire_width = p_width;
 	_on_wheel_dimensions_changed();
-	update_gizmos();
 }
 
 double Wheel3D::get_hub_radius() const {
 	return hub_radius;
 }
 
-void Wheel3D::set_hub_radius(double p_radius) {
+void Wheel3D::set_hub_radius(const double& p_radius) {
 	hub_radius = p_radius;
 	if (tire_radius < hub_radius) {
 		tire_radius = hub_radius;
 	}
 	_on_wheel_dimensions_changed();
-	update_gizmos();
 }
 
 double Wheel3D::get_suspension_travel() const {
 	return suspension_travel;
 }
 
-void Wheel3D::set_suspension_travel(double p_length) {
+void Wheel3D::set_suspension_travel(const double& p_length) {
 	suspension_travel = p_length;
-	_update_vehicle_connect_point();
+	_update_connect_points();
+
 	bump_rel = bump * suspension_travel;
 	rebound_rel = rebound * suspension_travel;
 	stiff_rel = spring_stiffness * suspension_travel;
 	anti_roll_rel = anti_roll * suspension_travel;
 	suspension.set_param(SliderJoint3D::Param::PARAM_LINEAR_LIMIT_UPPER, suspension_travel);
-	suspension.set_param(SliderJoint3D::Param::PARAM_ANGULAR_LIMIT_UPPER, 90.0);
 
 	update_gizmos();
 }
@@ -424,7 +504,7 @@ double Wheel3D::get_spring_stiffness() const {
 	return spring_stiffness;
 }
 
-void Wheel3D::set_spring_stiffness(double p_value) {
+void Wheel3D::set_spring_stiffness(const double& p_value) {
 	spring_stiffness = p_value;
 	stiff_rel = spring_stiffness * suspension_travel;
 }
@@ -433,7 +513,7 @@ double Wheel3D::get_spring_anti_roll() const {
 	return anti_roll;
 }
 
-void Wheel3D::set_spring_anti_roll(double p_value) {
+void Wheel3D::set_spring_anti_roll(const double& p_value) {
 	anti_roll = p_value;
 	anti_roll_rel = anti_roll * suspension_travel;
 }
@@ -442,7 +522,7 @@ double Wheel3D::get_damping_bump() const {
 	return bump;
 }
 
-void Wheel3D::set_damping_bump(double p_value) {
+void Wheel3D::set_damping_bump(const double& p_value) {
 	bump = p_value;
 	bump_rel = bump * suspension_travel;
 }
@@ -451,7 +531,7 @@ Ref<Curve> Wheel3D::get_damping_bump_curve() const {
 	return bump_curve;
 }
 
-void Wheel3D::set_damping_bump_curve(Ref<Curve> p_curve) {
+void Wheel3D::set_damping_bump_curve(const Ref<Curve>& p_curve) {
 	bump_curve = p_curve;
 	_curve_temp(bump_curve, bump_function);
 }
@@ -460,7 +540,7 @@ double Wheel3D::get_damping_rebound() const {
 	return rebound;
 }
 
-void Wheel3D::set_damping_rebound(double p_value) {
+void Wheel3D::set_damping_rebound(const double& p_value) {
 	rebound = p_value;
 	rebound_rel = rebound * suspension_travel;
 }
@@ -469,7 +549,7 @@ Ref<Curve> Wheel3D::get_damping_rebound_curve() const {
 	return rebound_curve;
 }
 
-void Wheel3D::set_damping_rebound_curve(Ref<Curve> p_curve) {
+void Wheel3D::set_damping_rebound_curve(const Ref<Curve>& p_curve) {
 	rebound_curve = p_curve;
 	_curve_temp(rebound_curve, rebound_function);
 }
@@ -478,28 +558,32 @@ Wheel3D::Sides Wheel3D::get_side() const {
 	return side;
 }
 
-void Wheel3D::set_side(Sides p_value) {
+void Wheel3D::set_side(const Sides p_value) {
 	// side_sign = side - 1;
 	side = p_value;
 	side_sign = side - 1;
-	signed_wheel_offset = -side_sign * wheel_offset;
+	// signed_wheel_offset = -side_sign * wheel_offset;
 	signed_camber_angle = side_sign * camber_angle;
 	signed_toe_angle = side_sign * toe_angle;
-	signed_steering_axis_inclination = -side_sign * steering_axis_inclination;
-	// axle_axis_reference = side_sign * RIGHT_AXIS_REFERENCE;
+	signed_inclination = -side_sign * inclination;
+	// axle_axis_reference = side_sign * RIGHT_AXIS;
 	// _update_axle_axis();
-	axle_axis = RIGHT_AXIS_REFERENCE * side_sign;
+	axle_axis_reference = RIGHT_AXIS * side_sign;
 	// _update_steering_axis();
 	// set_position(body_connect_point - steering_axis * suspension_travel - axle_axis *
 	// wheel_offset);
 	_update_steering_axis();
+	_update_axle_axis();
+	_update_suspension_transform();
+	_update_connect_points();
+	update_gizmos();
 }
 
 bool Wheel3D::get_powered() const {
 	return powered;
 }
 
-void Wheel3D::set_powered(bool p_value) {
+void Wheel3D::set_powered(const bool& p_value) {
 	powered = p_value;
 	update_gizmos();
 }
@@ -508,7 +592,7 @@ bool Wheel3D::get_steered() const {
 	return steered;
 }
 
-void Wheel3D::set_steered(bool p_value) {
+void Wheel3D::set_steered(const bool& p_value) {
 	steered = p_value;
 }
 
@@ -522,56 +606,80 @@ void Wheel3D::set_steered(bool p_value) {
 // }
 
 double Wheel3D::get_alignment_steering_axis_inclination() const {
-	return steering_axis_inclination;
+	return inclination;
 }
 
-void Wheel3D::set_alignment_steering_axis_inclination(double p_angle) {
-	steering_axis_inclination = p_angle;
-	signed_steering_axis_inclination = -side_sign * steering_axis_inclination;
-	_on_suspension_rotated();
-}
-
-double Wheel3D::get_alignment_camber_angle() const {
-	return camber_angle;
-}
-
-void Wheel3D::set_alignment_camber_angle(double p_angle) {
-	camber_angle = p_angle;
-	signed_camber_angle = side_sign * camber_angle;
-	_on_centered_wheel_rotated();
-}
-
-double Wheel3D::get_alignment_toe_angle() const {
-	return toe_angle;
-}
-
-void Wheel3D::set_alignment_toe_angle(double p_angle) {
-	toe_angle = p_angle;
-	signed_toe_angle = side_sign * toe_angle;
-	_on_centered_wheel_rotated();
+void Wheel3D::set_alignment_steering_axis_inclination(const double& p_angle) {
+	inclination = p_angle;
+	signed_inclination = -side_sign * inclination;
+	_update_steering_axis();
+	_update_axle_axis();
+	_update_suspension_transform();
+	_update_connect_points();
+	// set_position(w_connect_point + axle_axis * wheel_offset);
+	update_gizmos();
 }
 
 double Wheel3D::get_alignment_caster_angle() const {
 	return caster_angle;
 }
 
-void Wheel3D::set_alignment_caster_angle(double p_angle) {
+void Wheel3D::set_alignment_caster_angle(const double& p_angle) {
 	caster_angle = p_angle;
-	_on_suspension_rotated();
+	_update_steering_axis();
+	_update_axle_axis();
+	_update_suspension_transform();
+	_update_connect_points();
+	//	set_position(w_connect_point + axle_axis * wheel_offset);
+	update_gizmos();
+}
+
+double Wheel3D::get_alignment_camber_angle() const {
+	return camber_angle;
+}
+
+void Wheel3D::set_alignment_camber_angle(const double& p_angle) {
+	camber_angle = p_angle;
+	signed_camber_angle = side_sign * camber_angle;
+	//	_on_centered_wheel_rotated();
+	_update_axle_axis();
+	_update_connect_points();
+	update_gizmos();
+}
+
+double Wheel3D::get_alignment_toe_angle() const {
+	return toe_angle;
+}
+
+void Wheel3D::set_alignment_toe_angle(const double& p_angle) {
+	toe_angle = p_angle;
+	signed_toe_angle = side_sign * toe_angle;
+	//	_on_centered_wheel_rotated();
+	_update_axle_axis();
+	_update_connect_points();
+	update_gizmos();
 }
 
 double Wheel3D::get_alignment_wheel_offset() const {
 	return wheel_offset;
 }
 
-void Wheel3D::set_alignment_wheel_offset(double p_value) {
+void Wheel3D::set_alignment_wheel_offset(const double& p_value) {
 	// translate(axle_axis * (p_value - wheel_offset));
 
 	wheel_offset = p_value;
-	signed_wheel_offset = -side_sign * wheel_offset;
-	local_w_connect_point = -axle_axis * wheel_offset;
-	w_connect_point = get_basis().xform(local_w_connect_point);
+	// signed_wheel_offset = -side_sign * wheel_offset;
+	//	local_w_connect_point = -axle_axis * wheel_offset;
+	//	w_connect_point = get_basis().xform(local_w_connect_point);
+	//  set_position(axle_axis * wheel_offset);
+	//  set_position(v_connect_point_max - steering_axis * uncompression + wheel_offset *
+	//  axle_axis);
+	// set_position(w_connect_point + axle_axis * wheel_offset);
+	//_update_connect_points();
 	_update_suspension_transform();
+	_update_connect_points();
+	_update_debug_shapes();
+	update_gizmos();
 }
 
 // Vector3 get_wheel_connection_point() const { return local_w_connect_point; }
@@ -616,22 +724,20 @@ Wheel3D::Wheel3D() {
 	tire_cast.set_rotation(wheel_child_rotation);
 	hub_collider.set_rotation(wheel_child_rotation);
 	suspension.set_rotation(wheel_child_rotation);
+	_update_debug_shapes();
 
-	suspension.set_position(local_w_connect_point);
-
-	springDebugA.set_position(Vector3(suspension_travel, 0, 0));
-	springDebugB.set_position(Vector3(0, 0, 0));
-
+	genMat.set_albedo(Color(1, 1, 1));
 	matA.set_albedo(Color(1, 1, 1));
 	matB.set_albedo(Color(0, 0, 1));
+	genericMesh.set_material(cast_to<Material>(&genMat));
 	springDebugMeshA.set_material(cast_to<Material>(&matA));
 	springDebugMeshB.set_material(cast_to<Material>(&matB));
 	connectDebugMeshA.set_material(cast_to<Material>(&matA));
 	connectDebugMeshB.set_material(cast_to<Material>(&matB));
 
-	springDebugMeshA.set_radius(0.05);
-	springDebugMeshA.set_height(0.1);
-	connectDebugMeshA.set_size(Vector3(0.1, 0.1, 0.1));
+	genericMesh.set_radius(0.05);
+	genericMesh.set_height(0.1);
+
 	springDebugMeshA.set_radius(0.05);
 	springDebugMeshA.set_height(0.1);
 	connectDebugMeshA.set_size(Vector3(0.1, 0.1, 0.1));
@@ -639,9 +745,10 @@ Wheel3D::Wheel3D() {
 	springDebugMeshB.set_radius(0.05);
 	springDebugMeshB.set_height(0.1);
 	connectDebugMeshB.set_size(Vector3(0.1, 0.1, 0.1));
-	springDebugMeshB.set_radius(0.05);
-	springDebugMeshB.set_height(0.1);
-	connectDebugMeshB.set_size(Vector3(0.1, 0.1, 0.1));
+
+	axisDebug0.set_mesh(cast_to<Mesh>(&genericMesh));
+	axisDebugS.set_mesh(cast_to<Mesh>(&genericMesh));
+	axisDebugA.set_mesh(cast_to<Mesh>(&genericMesh));
 
 	springDebugA.set_mesh(cast_to<Mesh>(&springDebugMeshA));
 	springDebugB.set_mesh(cast_to<Mesh>(&springDebugMeshB));
@@ -651,9 +758,7 @@ Wheel3D::Wheel3D() {
 	//	side_sign = side - 1;
 }
 
-Wheel3D::~Wheel3D() {
-	queue_free();
-}
+Wheel3D::~Wheel3D() { }
 
 void Wheel3D::emit_custom_signal(const String& name, int value) {
 	emit_signal("custom_signal", name, value);
@@ -742,25 +847,25 @@ void Wheel3D::_bind_methods() {
 	);
 	BIND_METHOD(Wheel3D, get_alignment_steering_axis_inclination);
 
+	BIND_METHOD(Wheel3D, set_alignment_caster_angle, "alignment_caster_angle");
+	BIND_METHOD(Wheel3D, get_alignment_caster_angle);
+
 	BIND_METHOD(Wheel3D, set_alignment_camber_angle, "alignment_camber_angle");
 	BIND_METHOD(Wheel3D, get_alignment_camber_angle);
 
 	BIND_METHOD(Wheel3D, set_alignment_toe_angle, "alignment_toe_angle");
 	BIND_METHOD(Wheel3D, get_alignment_toe_angle);
 
-	BIND_METHOD(Wheel3D, set_alignment_caster_angle, "alignment_caster_angle");
-	BIND_METHOD(Wheel3D, get_alignment_caster_angle);
-
 	ADD_GROUP("Alignment", "alignment_");
 	BIND_PROPERTY_RANGED("alignment_wheel_offset", Variant::FLOAT, "0.0,2,0.001,suffix:m");
 	BIND_PROPERTY_RANGED(
 		"alignment_steering_axis_inclination",
 		Variant::FLOAT,
-		"-90,90,0.01,radians"
+		"-60,60,0.01,radians"
 	);
-	BIND_PROPERTY_RANGED("alignment_camber_angle", Variant::FLOAT, "-90,90,0.01,radians");
-	BIND_PROPERTY_RANGED("alignment_toe_angle", Variant::FLOAT, "-90,90,0.01,radians");
-	BIND_PROPERTY_RANGED("alignment_caster_angle", Variant::FLOAT, "-90,90,0.01,radians");
+	BIND_PROPERTY_RANGED("alignment_caster_angle", Variant::FLOAT, "-60,60,0.01,radians");
+	BIND_PROPERTY_RANGED("alignment_camber_angle", Variant::FLOAT, "-60,60,0.01,radians");
+	BIND_PROPERTY_RANGED("alignment_toe_angle", Variant::FLOAT, "-60,60,0.01,radians");
 
 	BIND_METHOD(Wheel3D, set_suspension_travel, "suspension_travel");
 	BIND_METHOD(Wheel3D, get_suspension_travel);
@@ -883,7 +988,7 @@ bool Wheel3D::_get(const StringName& p_name, Variant& r_ret) const {
 		return true;
 	}
 	if (name == "vehicle_connection_point") {
-		r_ret = v_connect_point;
+		r_ret = local_v_connect_point_max;
 		return true;
 	}
 	return false;

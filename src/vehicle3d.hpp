@@ -16,6 +16,7 @@
 #include <godot_cpp/classes/rigid_body3d.hpp>
 #include <godot_cpp/classes/shape_cast3d.hpp>
 #include <godot_cpp/classes/slider_joint3d.hpp>
+#include <godot_cpp/classes/sphere_mesh.hpp>
 #include <godot_cpp/classes/sphere_shape3d.hpp>
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/templates/vector.hpp>
@@ -23,22 +24,21 @@
 using namespace godot;
 
 namespace {
-static inline const Vector3 ZEROS = Vector3(0, 0, 0);
-static inline const Vector3 UP_AXIS_REFERENCE = Vector3(0, 1, 0);
-static inline const Vector3 FORWARD_AXIS_REFERENCE = Vector3(0, 0, -1);
-static inline const Vector3 RIGHT_AXIS_REFERENCE = Vector3(1, 0, 0);
-static inline constexpr double HALF_PI = Math_PI / 2.0;
+static constexpr Vector3::Axis AXIS_X = Vector3::Axis::AXIS_X;
+inline const Vector3 ZEROS{Vector3(0, 0, 0)}, UP_AXIS{Vector3(0, 1, 0)},
+	FRONT_AXIS{Vector3(0, 0, -1)}, RIGHT_AXIS{Vector3(1, 0, 0)};
+constexpr double HALF_PI{Math_PI / 2.0};
 
-double yes_curve(double yMax, double xCoord, Ref<Curve> curve) {
+double inline yes_curve(double& yMax, double& xCoord, Ref<Curve>& curve) {
 	return yMax * xCoord * (curve->sample_baked(xCoord));
 }
 
-double no_curve(double yMax, double xCoord, Ref<Curve> curve) {
+double inline no_curve(double& yMax, double& xCoord, Ref<Curve>& curve) {
 	return yMax * xCoord;
 }
 
-auto bump_function = no_curve;
-auto rebound_function = no_curve;
+auto inline bump_function = no_curve;
+auto inline rebound_function = no_curve;
 } // namespace
 
 class Vehicle3D;
@@ -56,48 +56,50 @@ public:
 
 private:
 	Vehicle3D* body = nullptr;
-	NodePath opposite_wheel;
 	Wheel3D* sib;
+	NodePath opposite_wheel;
 	Transform3D relaxed_transform;
 	Sides side = Sides::LEFT;
-	int side_sign = side - 1;
+	int side_sign{side - 1};
 	Transform3D wheelTransform = get_transform();
 	// Transform3D centeredTransform = get_transform();
 	Vector3 centered_rotation = ZEROS;
+	Vector3 centered_position = ZEROS;
+
 	// node3d
 	Transform3D globalTransform;
 	Basis globalBasis;
 	Vector3 globalOrigin;
 	Vector3 local_origin;
 	// dimensions
-	double tire_radius = 0.5;
-	double tire_width = 0.3;
-	double hub_radius = tire_width / 2.0;
-	double corner_distance;
-	double corner_angle;
+	double tire_radius{0.5};
+	double tire_width{0.3};
+	double hub_radius{tire_width / 2.0};
+	double corner_distance{Math::sqrt(tire_radius * tire_radius + 0.25 * tire_width * tire_width)};
+	double corner_angle{HALF_PI - Math::atan(tire_radius / (0.5 * tire_width))};
 	// suspension
 	SliderJoint3D suspension;
-	double suspension_travel = 1.0;
-	double camber_angle = 0.0;
-	double toe_angle = 0.0;
-	double steering_axis_inclination = 0.0;
-	double caster_angle = 0.0;
-	double wheel_offset = 0.0;
-	double signed_wheel_offset = 0.0;
-	double signed_camber_angle = 0.0;
-	double signed_toe_angle = 0.0;
-	double signed_steering = 0.0;
-	double signed_steering_axis_inclination = 0.0;
-	Vector3 steering_axis = UP_AXIS_REFERENCE;
-	Vector3 axle_axis = side_sign * RIGHT_AXIS_REFERENCE;
-	Vector3 w_connect_point = ZEROS;
-	Vector3 v_connect_point = UP_AXIS_REFERENCE;
-	Vector3 local_w_connect_point = ZEROS;
-	Vector3 local_v_connect_point = UP_AXIS_REFERENCE;
-	Vector3 relaxed_wheel_connect_point = ZEROS;
+	double suspension_travel{1.0};
+	double camber_angle{0.0};
+	double toe_angle{0.0};
+	double inclination{0.0};
+	double caster_angle{0.0};
+	double wheel_offset{0.0};
+	double signed_camber_angle{0.0}, signed_toe_angle{0.0}, signed_steering{0.0},
+		signed_inclination{0.0};
+	Vector3 steering_axis{UP_AXIS};
+	Vector3 axle_axis_reference{side_sign * RIGHT_AXIS};
+	Vector3 axle_axis{axle_axis_reference};
+	Vector3 w_connect_point{ZEROS};
+	Vector3 v_connect_point_max{UP_AXIS};
+	Vector3 dynamic_local_w_connect_point{ZEROS};
+	Vector3 dynamic_local_v_connect_point{UP_AXIS};
+	Vector3 local_w_connect_point{ZEROS};
+	Vector3 local_v_connect_point_max{UP_AXIS};
+	Vector3 relaxed_wheel_connect_point{ZEROS};
 
 	// spring
-	double spring_stiffness = 20.0;
+	double spring_stiffness{20.0};
 	double stiff_rel = spring_stiffness * suspension_travel;
 	double anti_roll = 1.0;
 	double anti_roll_rel = anti_roll * suspension_travel;
@@ -115,9 +117,14 @@ private:
 	double max_ackermann = 0.57;
 	double ackermann_factor = 0.0;
 	double ackermann_steering = 0.0;
+	double prev_ackermann_steering = 0.0;
+
 	// physics loop
 	double compression = 0.0;
+	double uncompression = 1.0;
 	double prev_compression = 0.0;
+	double prev_uncompression = 0.0;
+
 	double spring_force;
 	double damp_force;
 	// applied forces
@@ -130,17 +137,25 @@ private:
 	CollisionShape3D hub_collider;
 	CylinderShape3D tire_cast_shape;
 	// debug
+	SphereMesh genericMesh;
 	CapsuleMesh springDebugMeshA;
 	CapsuleMesh springDebugMeshB;
 	BoxMesh connectDebugMeshA;
 	BoxMesh connectDebugMeshB;
+
+	StandardMaterial3D genMat;
 	StandardMaterial3D matA;
 	StandardMaterial3D matB;
 	MeshInstance3D springDebugA;
 	MeshInstance3D springDebugB;
 	MeshInstance3D connectDebugA;
 	MeshInstance3D connectDebugB;
+	MeshInstance3D axisDebug0;
+	MeshInstance3D axisDebugS;
+	MeshInstance3D axisDebugA;
 	RayCast3D springDebugRay;
+	//	RayCast3D springDebugRay2;
+	Vector<RayCast3D*> rays;
 
 	Vector3 w_to_v;
 
@@ -149,18 +164,32 @@ private:
 	RayCast3D ray_front_right;
 	RayCast3D ray_back_left;
 	RayCast3D ray_back_right;
-	void _on_wheel_rotated();
-	void _on_centered_wheel_rotated();
-	void _on_suspension_rotated();
+	// void _on_wheel_rotated();
+	//	void _on_centered_wheel_rotated();
+	//	void _on_suspension_rotated();
 	void _on_steering_changed();
 	void _on_wheel_dimensions_changed();
 	// void _on_curve_changed(Ref<Curve> curve);
 	template<typename Function>
-	void _curve_temp(Ref<Curve> curve, Function& func);
+	void _curve_temp(Ref<Curve>& curve, Function& func);
+	// void _update_steering_axis(
+	//	Vector3& toRotate,
+	//	double rotation1,
+	//	double rotation2,
+	//	Vector3 axis1
+	//);
+
 	void _update_steering_axis();
-	void _update_vehicle_connect_point();
+	// rotation1, double rotation2, Vector3
+	// axis1);
+	void _update_axle_axis();
+	void _update_connect_points();
+	void _update_dynamic_connect_points();
+
 	void _update_suspension_transform();
 	// void _update_suspension_length();
+	void _update_debug_shapes();
+	void _add_debug_ray(const Vector3& position, const Vector3& target);
 
 public:
 	void _enter_tree() override;
@@ -172,49 +201,49 @@ public:
 	NodePath get_opposite_wheel() const;
 	void set_opposite_wheel(const NodePath& p_node);
 	double get_ackermann_input() const;
-	void set_ackermann_input(double p_factor);
+	void set_ackermann_input(const double& p_factor);
 	double get_steering() const;
-	void set_steering(double p_angle);
+	void set_steering(const double& p_angle);
 	double get_engine_torque() const;
-	void set_engine_torque(double p_torque);
+	void set_engine_torque(const double& p_torque);
 	double get_brake_torque() const;
-	void set_brake_torque(double p_torque);
+	void set_brake_torque(const double& p_torque);
 	double get_tire_radius() const;
-	void set_tire_radius(double p_radius);
+	void set_tire_radius(const double& p_radius);
 	double get_width() const;
-	void set_width(double p_width);
+	void set_width(const double& p_width);
 	double get_hub_radius() const;
-	void set_hub_radius(double p_radius);
+	void set_hub_radius(const double& p_radius);
 	double get_suspension_travel() const;
-	void set_suspension_travel(double p_length);
+	void set_suspension_travel(const double& p_length);
 	double get_spring_stiffness() const;
-	void set_spring_stiffness(double p_value);
+	void set_spring_stiffness(const double& p_value);
 	double get_spring_anti_roll() const;
-	void set_spring_anti_roll(double p_value);
+	void set_spring_anti_roll(const double& p_value);
 	double get_damping_bump() const;
-	void set_damping_bump(double p_value);
+	void set_damping_bump(const double& p_value);
 	Ref<Curve> get_damping_bump_curve() const;
-	void set_damping_bump_curve(Ref<Curve> p_curve);
+	void set_damping_bump_curve(const Ref<Curve>& p_curve);
 	double get_damping_rebound() const;
-	void set_damping_rebound(double p_value);
+	void set_damping_rebound(const double& p_value);
 	Ref<Curve> get_damping_rebound_curve() const;
-	void set_damping_rebound_curve(Ref<Curve> p_value);
+	void set_damping_rebound_curve(const Ref<Curve>& p_value);
 	Sides get_side() const;
-	void set_side(Sides p_value);
+	void set_side(const Sides p_value);
 	bool get_powered() const;
-	void set_powered(bool p_value);
+	void set_powered(const bool& p_value);
 	bool get_steered() const;
-	void set_steered(bool p_value);
+	void set_steered(const bool& p_value);
 	double get_alignment_steering_axis_inclination() const;
-	void set_alignment_steering_axis_inclination(double p_angle);
+	void set_alignment_steering_axis_inclination(const double& p_angle);
 	double get_alignment_camber_angle() const;
-	void set_alignment_camber_angle(double p_angle);
+	void set_alignment_camber_angle(const double& p_angle);
 	double get_alignment_toe_angle() const;
-	void set_alignment_toe_angle(double p_angle);
+	void set_alignment_toe_angle(const double& p_angle);
 	double get_alignment_caster_angle() const;
-	void set_alignment_caster_angle(double p_angle);
+	void set_alignment_caster_angle(const double& p_angle);
 	double get_alignment_wheel_offset() const;
-	void set_alignment_wheel_offset(double p_value);
+	void set_alignment_wheel_offset(const double& p_value);
 	double get_ackermann_steering() const;
 	Vector3 get_steering_axis() const;
 	Vector3 get_axle_axis() const;
